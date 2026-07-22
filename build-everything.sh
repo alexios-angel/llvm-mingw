@@ -184,13 +184,13 @@ smoke_std_embed() {
     echo "SMOKE PASS: std::embed (compile-time asserts held; PE emitted)"
     if [ -z "$CURL_ARGS" ]; then
         fsrc="$EMBED_DIR/examples/std/fetch/source"
-        "$CXX" -std=c++2d \
+        "$CXX" -std=c++2d -I "$EMBED_DIR/include" \
             --fetch-allow=https://example.com/ \
             --fetch-allow='https://example.com/**' \
             "$fsrc/fetch_url.c++" -o "$OUT/std-fetch-smoke.exe"
         echo "SMOKE PASS: std::fetch positive (curl linked and live)"
         # Negative: without --fetch-allow the compile MUST fail.
-        if "$CXX" -std=c++2d "$fsrc/fetch_url.c++" \
+        if "$CXX" -std=c++2d -I "$EMBED_DIR/include" "$fsrc/fetch_url.c++" \
             -o "$OUT/std-fetch-denied.exe" 2>/dev/null; then
             echo "SMOKE FAIL: std::fetch compiled without --fetch-allow" 1>&2
             exit 1
