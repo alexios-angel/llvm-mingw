@@ -333,6 +333,14 @@ if [ -n "$CURL" ]; then
 fi
 if [ -n "$CURL_PREFIX" ]; then
     CMAKEFLAGS="$CMAKEFLAGS -DCURL_ROOT=$CURL_PREFIX"
+    # curl's CMake config defines CURL::libcurl as an ALIAS of
+    # CURL::libcurl_static, and cmake cannot forward alias targets into
+    # try_compile scratch projects - LLVM's check_symbol_exists
+    # (curl_easy_init) probe dies with "target was not found" even
+    # though the real link works fine. We built this curl ourselves:
+    # pre-seed the probe's answer and let the main project do the
+    # actual linking through the full target closure.
+    CMAKEFLAGS="$CMAKEFLAGS -DHAVE_CURL=1"
 fi
 
 if [ -n "$LTO" ]; then
