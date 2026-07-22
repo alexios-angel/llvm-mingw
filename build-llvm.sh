@@ -243,14 +243,19 @@ if [ -n "$HOST" ]; then
     esac
 
     native=""
-    for dir in llvm-project/llvm/build/bin llvm-project/llvm/build-asserts/bin; do
-        if [ -x "$dir/llvm-tblgen.exe" ]; then
-            native="$(pwd)/$dir"
-            break
-        elif [ -x "$dir/llvm-tblgen" ]; then
-            native="$(pwd)/$dir"
-            break
-        fi
+    # Any build dir variant may hold the native tools (--with-clang builds
+    # in build-withclang, PGO in build-*-pgo, ...). Requiring the tblgen to
+    # actually RUN here skips cross-compiled build dirs, and preferring the
+    # source tree's own tblgen over $PATH avoids picking up a distro
+    # llvm-tblgen generations older than the sources being built (tablegen
+    # syntax like ValueMerger is not backward compatible).
+    for dir in llvm-project/llvm/build*/bin; do
+        for f in llvm-tblgen llvm-tblgen.exe; do
+            if [ -x "$dir/$f" ] && "$dir/$f" --version >/dev/null 2>&1; then
+                native="$(pwd)/$dir"
+                break 2
+            fi
+        done
     done
     if [ -z "$native" ] && command -v llvm-tblgen >/dev/null; then
         native="$(dirname $(command -v llvm-tblgen))"
