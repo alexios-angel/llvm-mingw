@@ -1,11 +1,9 @@
 name: Builds
+# std-embed fork: builds happen on the devbox (see build-everything.sh),
+# not in CI - push/PR/cron triggers are disabled. The jobs are kept
+# intact and manually dispatchable should hosted runners ever be wanted.
 on:
-  push:
-    branches:
-      - '**'
-  pull_request:
-  schedule:
-    - cron: '0 0 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read

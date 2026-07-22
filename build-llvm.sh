@@ -16,8 +16,13 @@
 
 set -e
 
-: ${LLVM_REPOSITORY:=https://github.com/llvm/llvm-project.git}
-: ${LLVM_VERSION:=llvmorg-23.1.0-rc1}
+# std-embed fork: build clang/LLVM from the alexios-angel/llvm-project
+# std-embed branch (std::embed/#depend + std::fetch/__builtin_std_fetch)
+# instead of an upstream llvmorg tag. Branch refs are fetched --depth 1 and
+# checked out as FETCH_HEAD; pass LLVM_VERSION=<sha> to reproduce a past
+# build (every packaged toolchain records the resolved sha in versions.txt).
+: ${LLVM_REPOSITORY:=https://github.com/alexios-angel/llvm-project.git}
+: ${LLVM_VERSION:=std-embed}
 ASSERTS=OFF
 unset HOST
 BUILDDIR="build"
@@ -95,6 +100,19 @@ while [ $# -gt 0 ]; do
         LLVM_PROFDATA_FILE="$(cd "$(dirname "$LLVM_PROFDATA_FILE")" && pwd)/$(basename "$LLVM_PROFDATA_FILE")"
         BUILDDIR="$BUILDDIR-pgo"
         ;;
+    --enable-curl)
+        # FORCE_ON: the configure fails hard if libcurl can't be found, so a
+        # clang with std::fetch silently degraded can never ship.
+        CURL=FORCE_ON
+        ;;
+    --enable-curl=*)
+        CURL=FORCE_ON
+        CURL_PREFIX="${1#*=}"
+        ;;
+    --disable-curl)
+        CURL=OFF
+        unset CURL_PREFIX
+        ;;
     *)
         if [ -n "$PREFIX" ]; then
             echo Unrecognized parameter $1
@@ -108,7 +126,7 @@ done
 BUILDDIR="$BUILDDIR$ASSERTSSUFFIX"
 if [ -z "$CHECKOUT_ONLY" ]; then
     if [ -z "$PREFIX" ]; then
-        echo $0 [--enable-asserts] [--with-clang] [--use-linker=linker] [--thinlto] [--lto] [--instrumented[=type]] [--pgo[=profile]] [--disable-dylib] [--full-llvm] [--with-python] [--disable-lldb] [--disable-clang-tools-extra] [--host=triple] [--no-llvm-tool-reuse] [--macos-native-tools] dest
+        echo $0 [--enable-asserts] [--with-clang] [--use-linker=linker] [--thinlto] [--lto] [--instrumented[=type]] [--pgo[=profile]] [--disable-dylib] [--full-llvm] [--with-python] [--disable-lldb] [--disable-clang-tools-extra] [--host=triple] [--no-llvm-tool-reuse] [--macos-native-tools] [--enable-curl[=prefix]] [--disable-curl] dest
         exit 1
     fi
 
@@ -116,6 +134,10 @@ if [ -z "$CHECKOUT_ONLY" ]; then
         mkdir -p "$PREFIX"
         PREFIX="$(cd "$PREFIX" && pwd)"
     fi
+fi
+
+if [ -n "$CURL_PREFIX" ]; then
+    CURL_PREFIX="$(cd "$CURL_PREFIX" && pwd)"
 fi
 
 if [ ! -d llvm-project ]; then
@@ -239,7 +261,14 @@ if [ -n "$HOST" ]; then
         CMAKEFLAGS="$CMAKEFLAGS -DLLVM_NATIVE_TOOL_DIR=$native"
     fi
     CROSS_ROOT=$(cd $(dirname $(command -v $HOST-gcc))/../$HOST && pwd)
-    CMAKEFLAGS="$CMAKEFLAGS -DCMAKE_FIND_ROOT_PATH=$CROSS_ROOT"
+    FIND_ROOT="$CROSS_ROOT"
+    if [ -n "$CURL_PREFIX" ]; then
+        # Paths listed in CMAKE_FIND_ROOT_PATH are exempt from re-rooting,
+        # letting find_package(CURL) resolve CURL_ROOT (set below) as-is
+        # even with CMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY.
+        FIND_ROOT="$FIND_ROOT;$CURL_PREFIX"
+    fi
+    CMAKEFLAGS="$CMAKEFLAGS -DCMAKE_FIND_ROOT_PATH=$FIND_ROOT"
     CMAKEFLAGS="$CMAKEFLAGS -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER"
     CMAKEFLAGS="$CMAKEFLAGS -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY"
     CMAKEFLAGS="$CMAKEFLAGS -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY"
@@ -293,6 +322,17 @@ if [ -n "$COMPILER_LAUNCHER" ]; then
     # base_dir (CCACHE_BASEDIR) option. When setting that ccache option, this
     # option here doesn't really have any effect either, except for debug info.
     CMAKEFLAGS="$CMAKEFLAGS -DLLVM_USE_RELATIVE_PATHS_IN_FILES=ON"
+fi
+
+# libcurl backs std::fetch (__builtin_std_fetch) via LLVMHTTP. Native builds
+# find the system libcurl dev package; cross builds point CURL_ROOT at a
+# static libcurl from ./build-curl.sh (nothing from that prefix is shipped -
+# the static lib is folded into clang/libLLVM at link time).
+if [ -n "$CURL" ]; then
+    CMAKEFLAGS="$CMAKEFLAGS -DLLVM_ENABLE_CURL=$CURL"
+fi
+if [ -n "$CURL_PREFIX" ]; then
+    CMAKEFLAGS="$CMAKEFLAGS -DCURL_ROOT=$CURL_PREFIX"
 fi
 
 if [ -n "$LTO" ]; then

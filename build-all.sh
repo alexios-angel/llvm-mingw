@@ -105,6 +105,10 @@ while [ $# -gt 0 ]; do
         PGO=1
         FULL_PGO=1
         ;;
+    --enable-curl|--enable-curl=*|--disable-curl)
+        LLVM_ARGS="$LLVM_ARGS $1"
+        CURL_SEEN=1
+        ;;
     *)
         if [ -n "$PREFIX" ]; then
             if [ -n "$PREFIX_PGO" ]; then
@@ -120,9 +124,15 @@ while [ $# -gt 0 ]; do
     shift
 done
 if [ -z "$PREFIX" ]; then
-    echo "$0 [--host-clang[=clang]] [--enable-asserts] [--disable-dylib] [--with-clang] [--use-linker=linker] [--thinlto] [--full-llvm] [--disable-lldb] [--disable-lldb-mi] [--disable-clang-tools-extra] [--host=triple] [--with-default-win32-winnt=0x601] [--with-default-msvcrt=ucrt] [--enable-cfguard|--disable-cfguard] [--no-runtimes] [--llvm-only] [--no-tools] [--wipe-runtimes] [--clean-runtimes] [--stage1] [--profile[=type]] [--pgo[=profile]] [--full-pgo[=type]] dest [pgo-dest]"
+    echo "$0 [--host-clang[=clang]] [--enable-asserts] [--disable-dylib] [--with-clang] [--use-linker=linker] [--thinlto] [--full-llvm] [--disable-lldb] [--disable-lldb-mi] [--disable-clang-tools-extra] [--host=triple] [--with-default-win32-winnt=0x601] [--with-default-msvcrt=ucrt] [--enable-cfguard|--disable-cfguard] [--no-runtimes] [--llvm-only] [--no-tools] [--wipe-runtimes] [--clean-runtimes] [--stage1] [--profile[=type]] [--pgo[=profile]] [--full-pgo[=type]] [--enable-curl[=prefix]] [--disable-curl] dest [pgo-dest]"
     exit 1
 fi
+# std::fetch needs libcurl at clang build time. Require it by default
+# (FORCE_ON - the configure fails loudly rather than shipping a clang
+# with std::fetch silently degraded); pass --disable-curl for an
+# explicitly fetchless build. Propagates through --full-pgo recursion
+# via LLVM_ARGS.
+[ -n "$CURL_SEEN" ] || LLVM_ARGS="$LLVM_ARGS --enable-curl"
 if [ -n "$PREFIX_PGO" ] && [ -z "$PGO" ] && [ -z "$FULL_PGO" ]; then
     echo Unrecognized parameter $PREFIX_PGO
     exit 1
@@ -134,6 +144,21 @@ for dep in git cmake ${HOST_CLANG}; do
         exit 1
     fi
 done
+
+# Fail early rather than deep inside the LLVM configure: a bare
+# --enable-curl on a native build needs the system libcurl dev package.
+# (Cross builds get a prefix from build-curl.sh via --enable-curl=...)
+case " $LLVM_ARGS " in
+*" --enable-curl "*)
+    if [ -z "$HOST_ARGS" ] && [ -z "$HOST_CLANG" ] && \
+       ! command -v curl-config >/dev/null && \
+       ! pkg-config --exists libcurl 2>/dev/null; then
+        echo "libcurl dev files not found (install libcurl4-openssl-dev)," 1>&2
+        echo "or pass --disable-curl." 1>&2
+        exit 1
+    fi
+    ;;
+esac
 
 if [ -n "${HOST_CLANG}" ] && [ "${CFGUARD_ARGS}" = "--enable-cfguard"  ]; then
     "${HOST_CLANG}" -target x86_64-w64-mingw32 -c -x c -o - - -Werror -mguard=cf </dev/null >/dev/null 2>/dev/null || CFGUARD_ARGS="--disable-cfguard"

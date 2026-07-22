@@ -50,6 +50,9 @@ while [ $# -gt 0 ]; do
     --thinlto|--lto|--pgo*)
         LLVM_ARGS="$LLVM_ARGS $1"
         ;;
+    --disable-curl)
+        NO_CURL=1
+        ;;
     *)
         if [ -z "$NATIVE" ]; then
             NATIVE="$1"
@@ -66,7 +69,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 if [ -z "$CROSS_ARCH" ]; then
-    echo $0 native prefix arch [--with-python] [--with-busybox] [--disable-lldb] [--disable-lldb-mi] [--disable-clang-tools-extra] [--disable-mingw-w64-tools] [--disable-make] [--no-llvm-tool-reuse] [--thinlto] [--lto] [--pgo[=profile]]
+    echo $0 native prefix arch [--with-python] [--with-busybox] [--disable-lldb] [--disable-lldb-mi] [--disable-clang-tools-extra] [--disable-mingw-w64-tools] [--disable-make] [--no-llvm-tool-reuse] [--thinlto] [--lto] [--pgo[=profile]] [--disable-curl]
     exit 1
 fi
 
@@ -91,6 +94,13 @@ if [ -n "$PYTHON" ]; then
     LLVM_ARGS="$LLVM_ARGS --with-python"
 fi
 
+if [ -z "$NO_CURL" ]; then
+    # Static Schannel libcurl, linked into clang/libLLVM to back
+    # std::fetch. Lives in its own prefix; nothing ships from it.
+    ./build-curl.sh "$(pwd)/curl-prefix-$HOST" --host=$HOST
+    LLVM_ARGS="$LLVM_ARGS --enable-curl=$(pwd)/curl-prefix-$HOST"
+fi
+
 ./build-llvm.sh $PREFIX --host=$HOST $LLVM_ARGS
 if [ -z "$NO_LLDB" ] && [ -z "$NO_LLDB_MI" ]; then
     ./build-lldb-mi.sh $PREFIX --host=$HOST
@@ -103,6 +113,12 @@ if [ -z "$NO_MINGW_W64_TOOLS" ]; then
 fi
 ./install-wrappers.sh $PREFIX --host=$HOST
 ./prepare-cross-toolchain.sh $NATIVE $PREFIX $CROSS_ARCH
+if [ -z "$NO_CURL" ]; then
+    # curl code ships inside clang.exe/libLLVM.dll - the license notice
+    # must ride along in the packaged toolchain.
+    mkdir -p $PREFIX/share/curl
+    cp "$(pwd)/curl-prefix-$HOST/share/curl/COPYING.txt" $PREFIX/share/curl/
+fi
 if [ -z "$NO_MAKE" ]; then
     ./build-make.sh $PREFIX --host=$HOST
 fi

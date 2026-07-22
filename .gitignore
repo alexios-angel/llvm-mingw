@@ -6,3 +6,8 @@
 /cpython*
 /python-native
 /toolchain
+/curl-*
+/openssl-*
+/curl-prefix-*
+/install
+/dist

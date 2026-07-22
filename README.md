@@ -5,6 +5,50 @@ This is a recipe for reproducibly building a
 [LLVM](https://llvm.org)/[Clang](https://clang.llvm.org/)/[LLD](https://lld.llvm.org/)
 based mingw-w64 toolchain.
 
+About this fork (std-embed)
+---------------------------
+
+This fork builds clang/LLVM from
+[alexios-angel/llvm-project](https://github.com/alexios-angel/llvm-project)
+branch **`std-embed`** instead of an upstream `llvmorg` tag, producing
+mingw-w64 toolchains whose clang implements **`std::embed`/`#depend`**
+and **`std::fetch`/`__builtin_std_fetch`** (gated by `--fetch-allow`).
+The bundled libc++ ships the `<embed>` header for every target arch.
+
+What differs from upstream:
+
+- `build-llvm.sh` defaults `LLVM_REPOSITORY`/`LLVM_VERSION` to the fork
+  branch; every packaged toolchain records the resolved sha in
+  `versions.txt` (reproduce any build with `LLVM_VERSION=<sha>`).
+- **std::fetch has a live HTTP backend on every host.** LLVM is built
+  with `LLVM_ENABLE_CURL=FORCE_ON` by default (a clang with std::fetch
+  silently degraded can never ship; pass `--disable-curl` for an
+  explicitly fetchless build). Windows-hosted toolchains link a static,
+  HTTP/HTTPS-only libcurl with **Schannel** TLS (the Windows cert
+  store; nothing extra ships) built by the new `build-curl.sh`; the
+  Linux x86_64 host links the system libcurl (`libcurl4-openssl-dev`
+  to build); the Linux aarch64 host links a static curl+OpenSSL that
+  reads CA certs from `/etc/ssl/certs` (override at runtime with
+  `CURL_CA_BUNDLE`).
+- `build-everything.sh` builds the whole matrix on one Linux box
+  (a devbox: 8 cores/32 GB): Linux x86_64 + aarch64 hosted tarballs
+  and Windows-hosted zips for i686/x86_64/armv7/aarch64, each
+  targeting all five archs (incl. arm64ec) with the full feature set.
+  Plain Release takes ~20-24 h; `--pgo` (upstream-style ThinLTO+PGO
+  compilers) ~32-40 h. Stage one bootstraps with the distro clang+lld;
+  later stages compile with the freshly built std-embed clang.
+- CI is disabled on this fork (workflows are manual-dispatch only);
+  builds happen on the devbox.
+- macOS-universal and msys2 host builds keep working with the upstream
+  scripts but need real Apple/Windows hardware - `build-everything.sh`
+  does not cover them.
+
+Tracking upstream:
+
+    git remote add upstream https://github.com/mstorsjo/llvm-mingw.git
+    git fetch upstream
+    git rebase upstream/master
+
 Benefits of a LLVM based MinGW toolchain are:
 - Support for targeting ARM/ARM64 (while GCC obviously does support
   these architectures, it doesn't support Windows on ARM)
