@@ -166,6 +166,25 @@ package_zip() {
     echo "packaged $OUT/$2.zip"
 }
 
+# The curl code rides inside libclang-cpp (LLVMHTTP is non-component and
+# linked via clangAST), so probe there first. Match HTTPClient.cpp's own
+# curl-path string: the "libcurl/x.y.z" banner lives in curl's version.o,
+# which nothing references in a static link, so it never appears.
+assert_curl_linked() {
+    p="$1"
+    shift
+    for pat in "$@"; do
+        for f in "$p"/$pat; do
+            [ -e "$f" ] || continue
+            if llvm-strings "$f" 2>/dev/null | grep -q curl_easy_perform; then
+                return 0
+            fi
+        done
+    done
+    echo "ERROR: no curl code baked into $p" 1>&2
+    exit 1
+}
+
 # std::embed / std::fetch smoke against the embed repo's examples: the
 # features are COMPILE-TIME, so cross-compiling a Windows .exe on this
 # Linux box exercises them end to end (network included). The .exes
@@ -242,6 +261,9 @@ if [ -z "$SKIP_AARCH64" ]; then
         mkdir -p "$A64/share/curl"
         cp "$(pwd)/curl-prefix-aarch64-linux-gnu/share/curl/COPYING.txt" "$A64/share/curl/"
     fi
+    if [ -z "$CURL_ARGS" ]; then
+        assert_curl_linked "$A64" "lib/libclang-cpp.so*" "lib/libLLVM*.so*" "bin/clang-*"
+    fi
     record_versions "$A64"
     package_tar "$A64" llvm-mingw-$TAG-ucrt-$DISTRO-aarch64
     if [ -z "$KEEP_BUILDS" ]; then
@@ -257,13 +279,7 @@ if [ -z "$SKIP_WINDOWS" ]; then
             --with-python --with-busybox $LTO_PGO_ARGS $CURL_ARGS
         record_versions "$P"
         if [ -z "$CURL_ARGS" ]; then
-            # A curl version string baked into the binaries proves the
-            # static libcurl really linked in.
-            if ! llvm-strings "$P"/bin/libLLVM*.dll "$P"/bin/clang*.exe 2>/dev/null \
-                | grep -q 'libcurl/'; then
-                echo "ERROR: no libcurl baked into the $arch toolchain" 1>&2
-                exit 1
-            fi
+            assert_curl_linked "$P" "bin/libclang-cpp*.dll" "bin/libLLVM*.dll" "bin/clang-*.exe"
         fi
         package_zip "$P" llvm-mingw-$TAG-ucrt-$arch
         if [ -z "$KEEP_BUILDS" ]; then
